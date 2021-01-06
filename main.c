@@ -10,6 +10,7 @@
 #include <xgpio.h>
 #include <xuartps.h>
 #include <xscugic.h>
+#include <sleep.h>
 
 #define BUTTONS_channel		2
 #define BUTTONS_AXI_ID		XPAR_AXI_GPIO_SW_BTN_DEVICE_ID
@@ -35,10 +36,13 @@ u8 buttons = 0;
 static int IntcInitFunction(u16 DeviceId);
 int InterruptSystemSetup(XScuGic *XScuGicInstancePtr);
 void PushButtons_Intr_Handler(void *data);
+float converter( float u_in);
 
 int main(void)
 {
 	int Status;
+	float u_in = 1.0;
+	float u_out = 0.0;
 
 	// Initializes BTNS_SWTS as an XGPIO.
 	Status = XGpio_Initialize(&BTNS_SWTS, BUTTONS_AXI_ID);
@@ -62,12 +66,43 @@ int main(void)
 	// Initializes interruptions.
 	Status = IntcInitFunction(INTC_DEVICE_ID);
 
+
 	while(1)
 	{
+		u_out = converter(u_in);
+		printf("%2.6f\r\n",u_out);
+		sleep(1);
 		// Nothing here.
 	}
 
 	return 0;
+}
+
+float  converter( float u_in){
+//Defining variables to persist over function calls
+static float i1_k = 0.0;
+static float u1_k = 0.0;
+static float i2_k = 0.0;
+static float u2_k = 0.0;
+static float i3_k = 0.0;
+static float u3_k = 0.0;
+/*static float i1_k_h = 0.0;
+static float u1_k_h = 0.0;
+static float i2_k_h = 0.0;
+static float u2_k_h = 0.0;
+static float i3_k_h = 0.0;  */
+float u3_k_h = 0.0;
+
+//Hardcoded calculations for model
+i1_k = (1973*i1_k)/2000 - (403*u1_k)/25000 + (1203*u_in)/50000;
+u1_k = (7261*i1_k)/10000 - (1009*i2_k)/5000 - (1377*i3_k)/5000 + (3009*u1_k)/10000 + (3229*u2_k)/100000 + (3281*u3_k)/5000 + (1771*u_in)/100000;
+i2_k = (7001*i1_k)/10000 + (213*i2_k)/1250 + (3881*i3_k)/10000 + (82*u1_k)/125 + (59*u2_k)/250 - (4501*u3_k)/5000 + (427*u_in)/25000;
+u2_k = (2577*i1_k)/5000 - (1377*i2_k)/5000 + (1341*i3_k)/5000 + (153*u1_k)/1250 + (7353*u2_k)/10000 + (341*u3_k)/2500 + (1257*u_in)/100000;
+i3_k = (6727*i1_k)/10000 - (2799*i2_k)/5000 + (421*i3_k)/2500 + (179*u1_k)/200 - (2299*u2_k)/10000 - (6703*u3_k)/10000 + (1641*u_in)/100000;
+u3_k = (2261*i1_k)/10000 + (271*i2_k)/1000 + (1009*i3_k)/5000 + (6421*u1_k)/10000 + (3519*u2_k)/100000 + (643*u3_k)/2000 + (6358362097906761*u_in)/1152921504606846976;
+u3_k_h = u3_k;
+return u3_k_h;
+
 }
 
 static int IntcInitFunction(u16 DeviceId)
