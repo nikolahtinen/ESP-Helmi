@@ -11,6 +11,10 @@
 #include <xuartps.h>
 #include <xscugic.h>
 #include <sleep.h>
+#include <xttcps.h>             // 16-bit timer counter driver - Triple Timer Counter (TTC)
+#include <zynq_registers.h>
+#include <xuartps_hw.h>
+#include <xil_printf.h>
 
 #define BUTTONS_channel		2
 #define BUTTONS_AXI_ID		XPAR_AXI_GPIO_SW_BTN_DEVICE_ID
@@ -24,14 +28,31 @@
 #define INTC_DEVICE_ID 		XPAR_PS7_SCUGIC_0_DEVICE_ID
 #define INT_PushButtons		61
 
+// Device ID number for PS TTC0 (XPAR_XTTCPS_0_DEVICE_ID / XPAR_PS7_TTC_0_DEVICE_ID)
+#define TTC_TICK_DEVICE_ID    0U
+// Interrupt (IRQ) ID# number for TTC0 counter 0 from UG585 "TRM: - ch. 8.5 TTC" (XPAR_XTTCPS_0_INTR / XPS_TTC0_0_INT_ID)
+#define TTC_TICK_INTR_ID 42U
+
 #define LD0 		0x1
 #define LD1		 	0x2
 #define LD2 		0x4
 #define LD3 		0x8
 
+// constant for pwm input max value
+#define PWM_UMAX 5
+
 XGpio BTNS_SWTS, LEDS;
 static XScuGic INTCInst;
 u8 buttons = 0;
+
+// Set up routines for timer counters and interrupts
+static void SetupTicker();
+static void SetupTimer();
+static void TickHandler(void);
+static void SetupInterruptSystem(XScuGic * InterruptControllerInstancePtr);
+
+volatile float u_pwm = 0;
+
 
 static int IntcInitFunction(u16 DeviceId);
 int InterruptSystemSetup(XScuGic *XScuGicInstancePtr);
@@ -39,16 +60,30 @@ void PushButtons_Intr_Handler(void *data);
 float converter( float u_in);
 float PI(float y_ref, float y_act ,float Ki, float Kp,float * pu1);
 
+/* The XScuGic driver instance data. The user is required to allocate a
+ * variable of this type for every intc device in the system. A pointer
+ * to a variable of this type is then passed to the driver API functions.
+ */
+XScuGic InterruptControllerInstance; // Interrupt controller instance
+
 int main(void)
 {
 	int Status;
 	float u_in = 2.0;
 	float u_out = 0.0;
+<<<<<<< HEAD
 	float u_old = u_in;
 
 	float k_p = 5.0; 	//Hard parameters for PI controller thrown from a hat
 	float k_i = 5.0;
 
+=======
+	// Connect the Intc to the interrupt subsystem such that interrupts can occur.  This function is application specific.
+	SetupInterruptSystem( &InterruptControllerInstance);
+	 // Set up  the Ticker timer
+	SetupTimer();
+	SetupTicker();
+>>>>>>> ad6ccf7d3b0b365614db65759ab017a23975b590
 
 	// Initializes BTNS_SWTS as an XGPIO.
 	Status = XGpio_Initialize(&BTNS_SWTS, BUTTONS_AXI_ID);
@@ -71,6 +106,11 @@ int main(void)
 
 	// Initializes interruptions.
 	Status = IntcInitFunction(INTC_DEVICE_ID);
+	// Connect the Intc to the interrupt subsystem such that interrupts can occur.  This function is application specific.
+	SetupInterruptSystem( &InterruptControllerInstance);
+	// Set up  the Ticker timer
+	SetupTimer();
+	SetupTicker();
 
 
 	while(1)
@@ -79,6 +119,7 @@ int main(void)
 		u_out = converter(u_out);
 		printf("%2.6f\r\n",u_out);
 		sleep(1);
+		u_pwm = u_out/PWM_UMAX * 1000;
 		// Nothing here.
 	}
 
@@ -157,7 +198,7 @@ int InterruptSystemSetup(XScuGic *XScuGicInstancePtr)
 {
 	/*
 	 * Initialize the interrupt controller driver so that it is ready to use.
-	 * */
+	*/
 
 	XGpio_InterruptEnable(&BTNS_SWTS, 0xF);
 	XGpio_InterruptGlobalEnable(&BTNS_SWTS);
@@ -172,6 +213,40 @@ int InterruptSystemSetup(XScuGic *XScuGicInstancePtr)
 	Xil_ExceptionEnableMask(XIL_EXCEPTION_FIQ);
 
 	return XST_SUCCESS;
+}
+
+static void SetupInterruptSystem(XScuGic * InterruptControllerInstancePtr) {
+
+  //XScuGic_Config structure contains configuration information for the device
+  XScuGic_Config InterruptControllerConfigInstance; // Initialize structure of type XScuGic_Config
+  XScuGic_Config * InterruptControllerConfigPtr = & InterruptControllerConfigInstance; // These could be also declared global
+
+  // Initialize the interrupt controller driver (XScuGic_Config structure)
+  InterruptControllerConfigPtr->DeviceId = XPAR_PS7_SCUGIC_0_DEVICE_ID;
+  InterruptControllerConfigPtr->CpuBaseAddress = XPAR_PS7_SCUGIC_0_BASEADDR;
+  InterruptControllerConfigPtr->DistBaseAddress = XPAR_PS7_SCUGIC_0_DIST_BASEADDR;
+  InterruptControllerConfigPtr->HandlerTable[INTC_DEVICE_ID].CallBackRef = NULL;
+  InterruptControllerConfigPtr->HandlerTable[INTC_DEVICE_ID].Handler = NULL;
+
+  /**
+   * CfgInitialize a specific interrupt controller instance/driver. The
+   * initialization entails:
+   *
+   * - Initialize fields of the XScuGic structure
+   * - Initial vector table with stub function calls
+   * - All interrupt sources are disabled
+   */
+
+
+  XScuGic_CfgInitialize(InterruptControllerInstancePtr, InterruptControllerConfigPtr, InterruptControllerConfigPtr->CpuBaseAddress);
+  // Connect the interrupt controller interrupt handler to the hardware interrupt handling logic in the ARM processor.
+  // Initialize the exception vector table
+  Xil_ExceptionInit();
+  // Enable interrupts.
+  Xil_ExceptionRegisterHandler(XIL_EXCEPTION_ID_IRQ_INT, (Xil_ExceptionHandler) XScuGic_InterruptHandler, InterruptControllerInstancePtr);
+  // Enable interrupts in the ARM
+  Xil_ExceptionEnable();
+
 }
 
 void PushButtons_Intr_Handler(void *data)
@@ -193,4 +268,75 @@ void PushButtons_Intr_Handler(void *data)
 			break;
 	}
 	XGpio_InterruptClear(&BTNS_SWTS,0xF);
+}
+void SetupTimer() {
+  TTC0_CNT_CNTRL |= XTTCPS_CNT_CNTRL_DIS_MASK; //Counter Control Register: "Disable the counter"
+  // Reset the count control register to it's default value.
+  TTC0_CNT_CNTRL = XTTCPS_CNT_CNTRL_RESET_VALUE; //Counter Control Register:" Reset value"
+
+  // Reset the rest of the registers to the default values.
+  TTC0_CLK_CNTRL = 0;
+  TTC0_INTERVAL_VAL = 0;
+  TTC0_MATCH_1 	= 0;
+  TTC0_MATCH_2_COUNTER_2 = 0;
+  TTC0_MATCH_3_COUNTER_2 = 0;
+  TTC0_IER = 0;
+
+  // Reset the counter value
+  // TTC0_CNT_CNTRL |= XTTCPS_CNT_CNTRL_RST_MASK; // Counter Control Register: "Reset counter"
+
+  // Set the options
+  //Counter Control Register: "Reset counter" | "Disable the counter" | "Match mode" | "Interval mode" |"Enable output Waveform"
+  TTC0_CNT_CNTRL = XTTCPS_CNT_CNTRL_RST_MASK | XTTCPS_CNT_CNTRL_DIS_MASK | XTTCPS_CNT_CNTRL_MATCH_MASK | XTTCPS_CNT_CNTRL_INT_MASK| XTTCPS_CNT_CNTRL_POL_WAVE_MASK ;
+
+  TTC0_MATCH_0	= 0;
+  // Set the interval and prescale. Base clock is 111MHz
+  // Prescale value (N): if prescale is enabled, the  count rate is divided by 2^(N+1)
+  // 1 / (111MHz) * 555 * 2^(1+1) = 0.00002... [seconds]
+  TTC0_INTERVAL_VAL = 555;
+  TTC0_CLK_CNTRL &= ~(XTTCPS_CLK_CNTRL_PS_VAL_MASK | XTTCPS_CLK_CNTRL_PS_EN_MASK); // Clock Control register - clear: "Prescale value" & "Prescale enable"
+  TTC0_CLK_CNTRL |= (1 << XTTCPS_CLK_CNTRL_PS_VAL_SHIFT) | XTTCPS_CLK_CNTRL_PS_EN_MASK; // Clock Control register - set: "Prescale value" & "Prescale enable"
+}
+/*
+ * This function sets up Generic Interrupt Controller (GIC) and Triple Timer Counter (TTC) for interrupts
+ */
+void SetupTicker(void) {
+  // Connect to the interrupt controller (pointer to function)
+  InterruptControllerInstance.Config->HandlerTable[TTC_TICK_INTR_ID].Handler = (Xil_InterruptHandler) TickHandler;
+  // Enable the interrupt for the Timer counter
+  // ICDISER1:  Interrupt Controller Distributor (ICD) - Interrupt Set-enable Register (ISER) 1
+  ICDISER1 = 1 << (TTC_TICK_INTR_ID % 32); // Modulo operator (% 2^n) stripping off all but the n LSB bits (removes offset 32)
+  // Enable the interrupts for the tick timer/counter. We only care about the interval timeout.
+  // TCC0_IER: Triple Timer Counter (TCC) 0 - Interrupt Enable register (IER)
+  TTC0_IER |= XTTCPS_IXR_INTERVAL_MASK; // XTTCPS_IXR_INTERVAL_MASK: Interval Interrupt mask
+  // Start the tick timer/counter
+  TTC0_CNT_CNTRL &= ~XTTCPS_CNT_CNTRL_DIS_MASK; // Clear operation using XTTCPS_CNT_CNTRL_DIS_MASK
+}
+
+/*
+ * This function is the timer interrupt handler/
+ * the function that's run on interrupt.
+ */
+static void TickHandler(void) {
+
+
+	static unsigned int timer_ticks;		// local visibility,as global otherwise, alternative simple tick
+	// Read the interrupt status to clear the interrupt.
+	// TTC0_ISR: Triple Timer Counter (TTC) 0 - Interrupt Status Register (ISR)
+	TTC0_ISR; // Cleared on read
+	// Interrupt occurs every 20us --> 1000 ticks period is 20ms
+	timer_ticks++;
+	if (timer_ticks < u_pwm)
+	{
+		TTC0_MATCH_0  = u_pwm;
+	}
+	else if(timer_ticks >= 1000)
+	{
+		timer_ticks=0;
+		//AXI_LED_DATA ^= 0b1111; // Toggle (XOR operator (^)) two LEDs
+	}
+	else
+	{
+		TTC0_MATCH_0  = 0;
+	}
 }
