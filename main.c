@@ -37,12 +37,18 @@ static int IntcInitFunction(u16 DeviceId);
 int InterruptSystemSetup(XScuGic *XScuGicInstancePtr);
 void PushButtons_Intr_Handler(void *data);
 float converter( float u_in);
+float PI(float y_ref, float y_act ,float Ki, float Kp,float * pu1);
 
 int main(void)
 {
 	int Status;
-	float u_in = 1.0;
+	float u_in = 2.0;
 	float u_out = 0.0;
+	float u_old = u_in;
+
+	float k_p = 5.0; 	//Hard parameters for PI controller thrown from a hat
+	float k_i = 5.0;
+
 
 	// Initializes BTNS_SWTS as an XGPIO.
 	Status = XGpio_Initialize(&BTNS_SWTS, BUTTONS_AXI_ID);
@@ -69,7 +75,8 @@ int main(void)
 
 	while(1)
 	{
-		u_out = converter(u_in);
+		u_out = PI(u_in, u_out, k_i, k_p, &u_old); 	//Call PI-controller with reference voltage and output voltage of previous cycle and P I parameters
+		u_out = converter(u_out);
 		printf("%2.6f\r\n",u_out);
 		sleep(1);
 		// Nothing here.
@@ -103,6 +110,22 @@ u3_k = (2261*i1_k)/10000 + (271*i2_k)/1000 + (1009*i3_k)/5000 + (6421*u1_k)/1000
 u3_k_h = u3_k;
 return u3_k_h;
 
+}
+
+float PI(float y_ref, float y_act ,float Ki, float Kp,float * pu1){
+	float  u1_old;
+	float  error_new, u1_new, u_new;
+	float  u1_max = 10;
+	u1_old=*pu1;
+	error_new = y_ref-y_act;
+	u1_new = u1_old + Ki* error_new;
+	if (abs(u1_new)>= u1_max){		// check Saturation.
+		u1_new = u1_old;				// saturate integer
+	}
+	u_new =Kp* error_new+ u1_new;	// u=u2+u1
+	u1_old = u1_new;
+	*pu1 =u1_old;
+	return u_new;
 }
 
 static int IntcInitFunction(u16 DeviceId)
