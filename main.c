@@ -71,19 +71,15 @@ int main(void)
 	int Status;
 	float u_in = 2.0;
 	float u_out = 0.0;
-<<<<<<< HEAD
 	float u_old = u_in;
 
 	float k_p = 5.0; 	//Hard parameters for PI controller thrown from a hat
 	float k_i = 5.0;
-
-=======
 	// Connect the Intc to the interrupt subsystem such that interrupts can occur.  This function is application specific.
 	SetupInterruptSystem( &InterruptControllerInstance);
 	 // Set up  the Ticker timer
 	SetupTimer();
 	SetupTicker();
->>>>>>> ad6ccf7d3b0b365614db65759ab017a23975b590
 
 	// Initializes BTNS_SWTS as an XGPIO.
 	Status = XGpio_Initialize(&BTNS_SWTS, BUTTONS_AXI_ID);
