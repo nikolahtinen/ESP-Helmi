@@ -52,6 +52,17 @@ static void TickHandler(void);
 static void SetupInterruptSystem(XScuGic * InterruptControllerInstancePtr);
 
 volatile float u_pwm = 0;
+float u_in = 2.0;
+
+// K‰yttˆliittym‰n muuttujat t‰ss‰, pit‰‰ olla global jotta voidaan muokata interruptin kanssa
+int modulation = 0;
+float k_p = 20.0; 	//Hard parameters for PI controller thrown from a hat
+float k_i = 500;
+
+//M‰‰ritell‰‰n bool muuttuja tyyppi
+typedef enum { false, true } bool;
+bool saato = false;
+
 
 
 static int IntcInitFunction(u16 DeviceId);
@@ -69,12 +80,9 @@ XScuGic InterruptControllerInstance; // Interrupt controller instance
 int main(void)
 {
 	int Status;
-	float u_in = 2.0;
 	float u_out = 0.0;
 	float u_old = u_in;
 
-	float k_p = 5.0; 	//Hard parameters for PI controller thrown from a hat
-	float k_i = 5.0;
 	// Connect the Intc to the interrupt subsystem such that interrupts can occur.  This function is application specific.
 	SetupInterruptSystem( &InterruptControllerInstance);
 	 // Set up  the Ticker timer
@@ -108,44 +116,76 @@ int main(void)
 	SetupTimer();
 	SetupTicker();
 
-
 	while(1)
-	{
-		u_out = PI(u_in, u_out, k_i, k_p, &u_old); 	//Call PI-controller with reference voltage and output voltage of previous cycle and P I parameters
-		u_out = converter(u_out);
-		printf("%2.6f\r\n",u_out);
+		{
+		switch(modulation)
+		{
+			case  0:
+				printf("Paina Ensimmaist‰ nappia aloittaaksesi\n");
+				break;
+
+			case  1:
+				if(saato == true)
+				{
+					printf("Configurointi moodi\n S‰‰dett‰v‰ Parametri on k_i, k_i=%2.6f\n",k_i);
+				} else
+				{
+					printf("Configurointi moodi\n S‰‰dett‰v‰ Parametri on k_p, k_p=%2.6f\n",k_p);
+				}
+
+				break;
+
+			case  2:
+				printf("Idlataan\n");
+				break;
+
+			case  3:
+				printf("Modulointimoodi\n");
+				while(modulation == 3){
+					u_out = PI(u_in, u_out, k_i, k_p, &u_old); 	//Call PI-controller with reference voltage and output voltage of previous cycle and P I parameters
+					u_out = converter(u_out);
+					printf("Referenssi u_ref= %2.6f\n Muuntajan u_out= %2.6f\n\n",u_in,u_out);
+					sleep(1);
+					u_pwm = u_out/PWM_UMAX * 1000;
+				}
+				break;
+
+		}
 		sleep(1);
-		u_pwm = u_out/PWM_UMAX * 1000;
-		// Nothing here.
+
+		//Kirjotentaan ensimm‰inen ledi kun siirryt‰‰n configuraatio moodiin
+		//XGpio_DiscreteWrite(&LEDS, LEDS_channel, LD0);
+
+
 	}
 
 	return 0;
 }
 
 float  converter( float u_in){
-//Defining variables to persist over function calls
-static float i1_k = 0.0;
-static float u1_k = 0.0;
-static float i2_k = 0.0;
-static float u2_k = 0.0;
-static float i3_k = 0.0;
-static float u3_k = 0.0;
-/*static float i1_k_h = 0.0;
-static float u1_k_h = 0.0;
-static float i2_k_h = 0.0;
-static float u2_k_h = 0.0;
-static float i3_k_h = 0.0;  */
-float u3_k_h = 0.0;
+	//Defining variables to persist over function calls
+	static float i1_k = 0.0;
+	static float u1_k = 0.0;
+	static float i2_k = 0.0;
+	static float u2_k = 0.0;
+	static float i3_k = 0.0;
+	static float u3_k = 0.0;
+	/*static float i1_k_h = 0.0;
+	static float u1_k_h = 0.0;
+	static float i2_k_h = 0.0;
+	static float u2_k_h = 0.0;
+	static float i3_k_h = 0.0;  */
+	float u3_k_h = 0.0;
 
-//Hardcoded calculations for model
-i1_k = (1973*i1_k)/2000 - (403*u1_k)/25000 + (1203*u_in)/50000;
-u1_k = (7261*i1_k)/10000 - (1009*i2_k)/5000 - (1377*i3_k)/5000 + (3009*u1_k)/10000 + (3229*u2_k)/100000 + (3281*u3_k)/5000 + (1771*u_in)/100000;
-i2_k = (7001*i1_k)/10000 + (213*i2_k)/1250 + (3881*i3_k)/10000 + (82*u1_k)/125 + (59*u2_k)/250 - (4501*u3_k)/5000 + (427*u_in)/25000;
-u2_k = (2577*i1_k)/5000 - (1377*i2_k)/5000 + (1341*i3_k)/5000 + (153*u1_k)/1250 + (7353*u2_k)/10000 + (341*u3_k)/2500 + (1257*u_in)/100000;
-i3_k = (6727*i1_k)/10000 - (2799*i2_k)/5000 + (421*i3_k)/2500 + (179*u1_k)/200 - (2299*u2_k)/10000 - (6703*u3_k)/10000 + (1641*u_in)/100000;
-u3_k = (2261*i1_k)/10000 + (271*i2_k)/1000 + (1009*i3_k)/5000 + (6421*u1_k)/10000 + (3519*u2_k)/100000 + (643*u3_k)/2000 + (6358362097906761*u_in)/1152921504606846976;
-u3_k_h = u3_k;
-return u3_k_h;
+	//Hardcoded calculations for model
+	i1_k = (1973*i1_k)/2000 - (403*u1_k)/25000 + (1203*u_in)/50000;
+	u1_k = (7261*i1_k)/10000 - (1009*i2_k)/5000 - (1377*i3_k)/5000 + (3009*u1_k)/10000 + (3229*u2_k)/100000 + (3281*u3_k)/5000 + (1771*u_in)/100000;
+	i2_k = (7001*i1_k)/10000 + (213*i2_k)/1250 + (3881*i3_k)/10000 + (82*u1_k)/125 + (59*u2_k)/250 - (4501*u3_k)/5000 + (427*u_in)/25000;
+	u2_k = (2577*i1_k)/5000 - (1377*i2_k)/5000 + (1341*i3_k)/5000 + (153*u1_k)/1250 + (7353*u2_k)/10000 + (341*u3_k)/2500 + (1257*u_in)/100000;
+	i3_k = (6727*i1_k)/10000 - (2799*i2_k)/5000 + (421*i3_k)/2500 + (179*u1_k)/200 - (2299*u2_k)/10000 - (6703*u3_k)/10000 + (1641*u_in)/100000;
+	u3_k = (2261*i1_k)/10000 + (271*i2_k)/1000 + (1009*i3_k)/5000 + (6421*u1_k)/10000 + (3519*u2_k)/100000 + (643*u3_k)/2000 + (6358362097906761*u_in)/1152921504606846976;
+	u3_k_h = u3_k;
+	return u3_k_h;
 
 }
 
@@ -251,6 +291,69 @@ void PushButtons_Intr_Handler(void *data)
 	switch(buttons)
 	{
 		case LD0:
+			if (modulation <= 2)
+			{
+				modulation = modulation + 1;
+			} else
+			{
+				modulation = 1;
+			}
+			break;
+		case LD1:
+			if (modulation == 1)
+			{
+				saato = !saato;
+			}
+			break;
+		case LD2:
+			if (modulation == 1)
+			{
+				if(saato == true)
+				{
+					if(k_i >= 0){
+						k_i = k_i -50;
+					}
+				} else
+				{
+					if(k_p >= 0){
+						k_p = k_p - 1 ;
+					}
+				}
+
+			} else if (modulation ==3)
+			{
+				if (u_in >= 0.5)
+				{
+					u_in = u_in -0.5;
+				}
+			}
+			break;
+		case LD3:
+			if (modulation == 1)
+			{
+				if(saato == true)
+				{
+					if(k_i >= 0){
+						k_i = k_i + 50;
+					}
+				} else
+				{
+					if(k_p >= 0){
+						k_p = k_p + 1 ;
+					}
+				}
+
+			} else if (modulation ==3)
+			{
+				if (u_in <= 9.5)
+				{
+					u_in = u_in +0.5;
+				}
+			}
+			break;
+
+		// Vanha switch case interrupt esimerkist‰
+		/*case LD0:
 			XGpio_DiscreteWrite(&LEDS, LEDS_channel, LD0);	// LD0.
 			break;
 		case LD1:
@@ -261,7 +364,7 @@ void PushButtons_Intr_Handler(void *data)
 			break;
 		case LD3:
 			XGpio_DiscreteWrite(&LEDS, LEDS_channel, LD3);	// LD3.
-			break;
+			break;*/
 	}
 	XGpio_InterruptClear(&BTNS_SWTS,0xF);
 }
