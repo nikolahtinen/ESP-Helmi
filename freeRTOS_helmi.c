@@ -111,11 +111,12 @@
 #include <stdlib.h>
 #include <stdio.h>
 
+/* Team includes */
 #include "esp-kirjasto.h"
 #include "zynq_registers.h"
 
 
-
+/* Tasks */
 static void UART_1();
 static void PWM_2();
 static void Convert_3();
@@ -158,7 +159,7 @@ xSemaphoreHandle modulation_sem;
 
 
 
-// Käyttöliittymän muuttujat tässä, pitää olla global jotta voidaan muokata interruptin kanssa
+// Global variables
 int modulation = 0;
 u8 buttons = 0;
 float k_p = 20.0; 	//Hard parameters for PI controller thrown from a hat
@@ -177,17 +178,13 @@ bool saato = false;
 //float PI(float y_ref, float y_act ,float Ki, float Kp,float * pu1);
 
 int main( void ) {
-	  AXI_BTN_TRI |= 0xF; // Set direction for buttons 0..3 ,  0 means output, 1 means input
-      AXI_LED_TRI = ~0xF;			// Set direction for bits 0-3 to output for the LEDs
-      SetupUART();
+	  AXI_BTN_TRI |= 0xF;		// Set direction for buttons 0..3 ,  0 means output, 1 means input
 
-      xil_printf( "Hello from FreeRTOS example main\r\n" );
+	  AXI_LED_TRI = ~0xF;		// Set direction for bits 0-3 to output for the LEDs
 
-	/**
-	 * Create four tasks t
-	 * Each function behaves as if it had full control of the controller.
-	 * https://www.freertos.org/a00125.html
-	 */
+	  SetupUART();				// Setup UART for the terminal communications
+
+
 	  // xtaskCreat(The function that implements the task, Text name for the task, provided to assist debugging only,
 	  // 			The stack allocated to the task, The task parameter is not used, so set to NULL,
 	  // 			The task runs at the idle priority. Higher number means higher priority)
@@ -296,31 +293,9 @@ static void Control4(){
 }
 
 
-
-
-
-/* Implement a function in a C file to generate a periodic interrupt at the
-required frequency. */
-//void vSetupTickInterrupt( void )
-//{
-/* FreeRTOS_Tick_Handler() is itself defined in the RTOS port layer.  An extern
-declaration is required to allow the following code to compile. */
-//extern void FreeRTOS_Tick_Handler( void );
-
-    /* Assume TIMER1_configure() configures a hypothetical timer peripheral called
-    TIMER1 to generate a periodic interrupt with a frequency set by its parameter. */
-  //  TIMER1_configure( 10);
-
-    /* Next assume Install_Interrupt() installs the function passed as its second
-    parameter as the handler for the peripheral passed as its first parameter. */
-    //Install_Interrupt( TIMER1, FreeRTOS_Tick_Handler );
-//}
-
-
-
 static void PI_4() {
 
-// ms -> tics, only if tick interval is more than ms, give directly as ticks
+	// ms -> tics, only if tick interval is more than ms, give directly as ticks
 	const TickType_t freq = pdMS_TO_TICKS(500);
 	TickType_t wakeTime;
 
@@ -352,10 +327,9 @@ static void PI_4() {
 		}
 
 		xSemaphoreTake(Upwm_sem, ( TickType_t ) 10);
+		// Uin value calculated for the PWM led 0-65535
 		u_pwm = u_in / PWM_UMAX * 65535;
 		xSemaphoreGive(Upwm_sem);
-
-		//xSemaphoreGive(Uin_sem);
 		// https://www.freertos.org/vtaskdelayuntil.html
 		vTaskDelayUntil(&wakeTime, freq);
 		taskYIELD();
@@ -366,14 +340,8 @@ static void Convert_3() {
 
 
 	const TickType_t freq = pdMS_TO_TICKS( 750 );
-	printf("sem ui saatu");
+
 	TickType_t wakeTime;
-
-	/* If juu need floating point context, and in conf it
-	 *  is not set for all #define configUSE_TASK_FPU_SUPPORT 2
-	 *  use the following */
-
-	// portTASK_USES_FLOATING_POINT();
 
 	// https://www.freertos.org/a00021.html#xTaskGetTickCount
 	wakeTime = xTaskGetTickCount();  // only once initialized
@@ -381,6 +349,7 @@ static void Convert_3() {
 	for( ;; ) {
 		if( xSemaphoreTake( Uin_sem, portMAX_DELAY ) == pdTRUE ){
 			AXI_LED_DATA =AXI_LED_DATA ^ 0x02;
+			// Convert output value if mode 3
 			if(modulation ==3){
 				u_out = converter(u_in);
 			}
@@ -396,7 +365,9 @@ static void Convert_3() {
 }
 
 static void Buttons_6() {
-	//const TickType_t freq = pdMS_TO_TICKS( 500 );
+
+	// Task for the button control
+	// call control functions depending which button is pressed
 	int Button_delay = 50;
 	//TickType_t wakeTime;
 
@@ -436,31 +407,32 @@ static void Buttons_6() {
 
 
 static void UART_1() {
+
+	// Read value from FIFO if exist
+	// and call control functions
 	const TickType_t freq = pdMS_TO_TICKS( 1000 );
 	TickType_t wakeTime;
 
 	wakeTime = xTaskGetTickCount();
 	for( ;; ) {
-		// Semaphore is just as an example here
+
 		xSemaphoreTake(LEDsem,portMAX_DELAY);
 		AXI_LED_DATA =AXI_LED_DATA ^ 0x04;
 		xSemaphoreGive(LEDsem);
-
-		//xil_printf("Uart task executed!!!\r\n");
 		char temp;
 		temp = uart_receive();
-		int i = 0;
+
 		while(temp){
-			i++;
+
 			if(temp == 49)	// ascii 49 = 1
 				Control1(modulation);
 			if(temp == 50)	// ascii 50 = 2
 				Control2(modulation);
-			if(temp == 43)	// ascii + = 43
+			if(temp == 43)	// ascii 43 = +
 				Control4(modulation);
-			if(temp == 45)	// ascii - = 45
+			if(temp == 45)	// ascii 45 = -
 				Control3(modulation);
-			//xil_printf("%d: %d\r\n",i,temp);
+
 			temp = uart_receive();
 		}
 
@@ -469,8 +441,6 @@ static void UART_1() {
 
 	}
 
-
-
 }
 
 
@@ -478,62 +448,65 @@ static void PWM_2() {
 
 	setupPWM();
 
+	// PWM led is on as long as timer_ticks is smaller than u_pvm value
+	// totally 65536/512 = 128 steps
+	// Brightness depends value of u_pvm
 
 	// Variable initialization
 	uint16_t timer_ticks = 0;
 	volatile u32* ptr_register = NULL;
 
-	//const TickType_t freq = pdMS_TO_TICKS(10);
-	//TickType_t wakeTime;
-
-	//wakeTime = xTaskGetTickCount();
-
 	for (;;) {
-		//xSemaphoreTake(LEDsem,portMAX_DELAY);
-		AXI_LED_DATA = AXI_LED_DATA ^ 0x08;
-		//xSemaphoreGive(LEDsem);
-		//if (modulation == 3) {
 
-			timer_ticks += 512;
-			xSemaphoreTake(Upwm_sem, ( TickType_t ) 10);
-			if (u_pwm > 0) {
-				*ptr_register = 0;
-				ptr_register = &TTC0_MATCH_0; // if positive led red
-				if (timer_ticks < u_pwm) {
-					*ptr_register = u_pwm;
-				} else if (timer_ticks >= 65536) {
-					timer_ticks = 0;
-					//AXI_LED_DATA ^= 0b1111; // Toggle (XOR operator (^)) two LEDs
-				} else {
-					*ptr_register = 0;
-				}
+		AXI_LED_DATA = AXI_LED_DATA ^ 0x08;
+
+		timer_ticks += 512;
+		xSemaphoreTake(Upwm_sem, ( TickType_t ) 10);
+		// If value is positive
+		if (u_pwm > 0) {
+			*ptr_register = 0;
+			ptr_register = &TTC0_MATCH_0; // if positive led red
+			if (timer_ticks < u_pwm) {
+				*ptr_register = u_pwm;
+			} else if (timer_ticks >= 65536) {
+				timer_ticks = 0;
 			} else {
 				*ptr_register = 0;
-				ptr_register = &TTC0_MATCH_1_COUNTER_3; // if negative led blue
-				if (timer_ticks < abs(u_pwm)) {
-					*ptr_register = abs(u_pwm);
-				} else if (timer_ticks >= 65536) {
-					timer_ticks = 0;
-					//AXI_LED_DATA ^= 0b1111; // Toggle (XOR operator (^)) two LEDs
-				} else {
-					*ptr_register = 0;
-				}
 			}
-			xSemaphoreGive(Upwm_sem);
-			//vTaskDelay( 10 );
-			taskYIELD();
-			//vTaskDelayUntil( &wakeTime, 1 );
-		//}
+		}
+		// if value is negative
+		else {
+			*ptr_register = 0;
+			ptr_register = &TTC0_MATCH_1_COUNTER_3; // if negative led blue
+			if (timer_ticks < abs(u_pwm)) {
+				*ptr_register = abs(u_pwm);
+			} else if (timer_ticks >= 65536) {
+				timer_ticks = 0;
+			} else {
+				*ptr_register = 0;
+			}
+		}
+		xSemaphoreGive(Upwm_sem);
+
+		taskYIELD();
+
 	}
 }
 static void printtaa_5() {
 
-	const TickType_t freq = pdMS_TO_TICKS( 750 );
+	// Printing to terminal for user which state is on
+	// mode 0: start
+	// mode 1: configuration
+	// mode 2: idle
+	// mode 3: modulation
+
+	const TickType_t freq = pdMS_TO_TICKS( 1000 );
 		TickType_t wakeTime;
 
 		wakeTime = xTaskGetTickCount();
 		for (;;) {
 			xSemaphoreTake(modulation_sem,portMAX_DELAY);
+
 			switch(modulation)
 			{
 				case  0:

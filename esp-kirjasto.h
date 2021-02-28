@@ -13,7 +13,7 @@
 
 float  converter( float u_in){
 	//Defining variables to persist over function calls
-	printf("converter\r\n");
+
 	static float i1_k = 0.0;
 	static float u1_k = 0.0;
 	static float i2_k = 0.0;
